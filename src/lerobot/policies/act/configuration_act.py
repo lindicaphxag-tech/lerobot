@@ -47,6 +47,12 @@ class ACTConfig(PreTrainedConfig):
             This should be no greater than the chunk size. For example, if the chunk size size 100, you may
             set this to 50. This would mean that the model predicts 100 steps worth of actions, runs 50 in the
             environment, and throws the other 50 out.
+        use_relative_actions: Whether to train and infer ACT actions relative to the state at action-chunk
+            generation time.
+        relative_exclude_joints: Action-name tokens that stay absolute when relative actions are enabled.
+            Defaults to keeping gripper dimensions absolute.
+        action_feature_names: Optional per-dimension action names used to build the relative-action mask.
+            Dataset-backed policy construction populates this field from dataset metadata when available.
         input_features: A dictionary defining the PolicyFeature of the input data for the policy. The key represents
             the input data name, and the value is PolicyFeature, which consists of FeatureType and shape attributes.
         output_features: A dictionary defining the PolicyFeature of the output data for the policy. The key represents
