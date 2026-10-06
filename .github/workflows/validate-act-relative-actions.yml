@@ -28,4 +28,9 @@ jobs:
           python -m pytest -q tests/processor/test_act_relative_actions.py tests/processor/test_act_processor.py
       - name: Run pre-commit on changed files
         run: |
+          set +e
           pre-commit run --files src/lerobot/policies/act/configuration_act.py src/lerobot/policies/act/processor_act.py tests/processor/test_act_relative_actions.py
+          status=$?
+          echo "==== formatter diff ===="
+          git diff -- src/lerobot/policies/act/configuration_act.py src/lerobot/policies/act/processor_act.py tests/processor/test_act_relative_actions.py
+          exit $status
