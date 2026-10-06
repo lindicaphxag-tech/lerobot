@@ -1,0 +1,28 @@
+name: Validate ACT relative actions
+
+on:
+  push:
+    branches:
+      - "fix/act-relative-actions-3312"
+    paths:
+      - "src/lerobot/policies/act/configuration_act.py"
+      - "src/lerobot/policies/act/processor_act.py"
+      - "tests/processor/test_act_relative_actions.py"
+      - ".github/workflows/validate-act-relative-actions.yml"
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install focused LeRobot environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Run ACT processor regressions
+        run: |
+          python -m pytest -q             tests/processor/test_act_relative_actions.py             tests/processor/test_act_processor.py
