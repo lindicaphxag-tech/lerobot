@@ -25,4 +25,7 @@ jobs:
           python -m pip install -e . pytest pre-commit
       - name: Run ACT processor regressions
         run: |
-          python -m pytest -q             tests/processor/test_act_relative_actions.py             tests/processor/test_act_processor.py
+          python -m pytest -q tests/processor/test_act_relative_actions.py tests/processor/test_act_processor.py
+      - name: Run pre-commit on changed files
+        run: |
+          pre-commit run --files src/lerobot/policies/act/configuration_act.py src/lerobot/policies/act/processor_act.py tests/processor/test_act_relative_actions.py
