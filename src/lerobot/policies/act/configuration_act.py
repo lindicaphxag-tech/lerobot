@@ -85,6 +85,14 @@ class ACTConfig(PreTrainedConfig):
     chunk_size: int = 100
     n_action_steps: int = 100
 
+    # Optional state-relative action representation. A predicted action chunk is
+    # expressed relative to the state at chunk generation time; queued actions
+    # therefore share one anchor until the queue drains.
+    use_relative_actions: bool = False
+    relative_exclude_joints: list[str] = field(default_factory=lambda: ["gripper"])
+    # Populated from dataset action metadata by make_policy when available.
+    action_feature_names: list[str] | None = None
+
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
             "VISUAL": NormalizationMode.MEAN_STD,
