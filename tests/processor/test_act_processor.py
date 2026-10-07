@@ -146,6 +146,17 @@ def test_act_processor_relative_actions_round_trip():
     torch.testing.assert_close(restored, action.unsqueeze(0))
 
 
+def test_act_relative_actions_refuse_unidentifiable_excluded_gripper():
+    """Without action names the shared mask would silently relativize gripper."""
+    config = create_default_config()
+    config.use_relative_actions = True
+    config.relative_exclude_joints = ["gripper"]
+    config.action_feature_names = None
+
+    with pytest.raises(ValueError, match="require action_feature_names"):
+        make_act_pre_post_processors(config, create_default_stats())
+
+
 def test_act_relative_actions_keep_chunk_anchor_until_queue_drains():
     """Later observations must not re-anchor a previously generated ACT chunk."""
     config = create_default_config()
