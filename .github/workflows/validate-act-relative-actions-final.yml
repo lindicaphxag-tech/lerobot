@@ -1,0 +1,27 @@
+name: Validate final ACT relative-action PR
+
+on:
+  push:
+    branches:
+      - "validation/act-relative-action-support-final"
+
+jobs:
+  final:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install LeRobot test environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+          python -m pip install pre-commit
+      - name: Run focused ACT processor tests
+        run: python -m pytest -q tests/processor/test_act_processor.py
+      - name: Run pre-commit on submitted files
+        run: |
+          pre-commit run --files             docs/source/act.mdx             src/lerobot/policies/act/configuration_act.py             src/lerobot/policies/act/processor_act.py             tests/processor/test_act_processor.py
