@@ -18,7 +18,7 @@ jobs:
       - name: Install LeRobot test environment
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
+          python -m pip install -e ".[test,diffusion]"
       - name: Run PR hook tests
         run: python -m pytest -q tests/policies/test_diffusion_hooks.py
       - name: Probe mismatched hook-width diagnostics
