@@ -125,6 +125,8 @@ def decode_video_frames(
     backend: str | None = None,
     return_uint8: bool = False,
     is_depth: bool = False,
+    *,
+    frame_indices: list[int] | None = None,
 ) -> torch.Tensor:
     """
     Decodes video frames using the specified backend.
@@ -139,6 +141,9 @@ def decode_video_frames(
         return_uint8 (bool): For RGB videos, if True return raw uint8 frames without float32 normalization.
             This reduces memory for DataLoader IPC; normalization can be done on GPU afterward.
         is_depth (bool): Set to True if the video is a depth map (1 channel, uint12).
+        frame_indices: Optional canonical logical frame indices. When provided to
+            an index-capable backend, frame identity comes from these indices while
+            timestamps remain the synchronization/PTS validation target.
 
     Returns:
         torch.Tensor: Decoded frames (RGB: float32 in [0,1] by default, or uint8 if return_uint8=True, Depth: uint12).
@@ -155,7 +160,13 @@ def decode_video_frames(
     if backend is None:
         backend = get_safe_default_video_backend()
     if backend == "torchcodec":
-        return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s, return_uint8=return_uint8)
+        return decode_video_frames_torchcodec(
+            video_path,
+            timestamps,
+            tolerance_s,
+            return_uint8=return_uint8,
+            frame_indices=frame_indices,
+        )
     elif backend == "pyav":
         return decode_video_frames_pyav(
             video_path, timestamps, tolerance_s, return_uint8=return_uint8, is_depth=is_depth
@@ -419,6 +430,8 @@ def decode_video_frames_torchcodec(
     log_loaded_timestamps: bool = False,
     decoder_cache: VideoDecoderCache | None = None,
     return_uint8: bool = False,
+    *,
+    frame_indices: list[int] | None = None,
 ) -> torch.Tensor:
     """Loads frames associated with the requested timestamps of a video using torchcodec.
 
@@ -428,6 +441,8 @@ def decode_video_frames_torchcodec(
         tolerance_s: Allowed deviation in seconds for frame retrieval.
         log_loaded_timestamps: Whether to log loaded timestamps.
         decoder_cache: Optional decoder cache instance. Uses default if None.
+        frame_indices: Optional canonical logical frame indices. When provided,
+            do not reconstruct identity from timestamp * decoder.average_fps.
 
     Note: Setting device="cuda" outside the main process, e.g. in data loader workers, will lead to CUDA initialization errors.
 
@@ -443,15 +458,23 @@ def decode_video_frames_torchcodec(
     # Use cached decoder instead of creating new one each time
     decoder = decoder_cache.get_decoder(str(video_path))
 
-    # get metadata for frame information
-    metadata = decoder.metadata
-    average_fps = metadata.average_fps
-    # convert timestamps to frame indices
-    frame_indices = [round(ts * average_fps) for ts in timestamps]
-    # retrieve frames based on indices: get_frames_at returns exactly one frame per
-    # requested index, in order, so frame i already corresponds to timestamps[i] --
-    # no nearest-match/re-stack needed (that redundant copy dominates decode overhead).
-    frames_batch = decoder.get_frames_at(indices=frame_indices)
+    if frame_indices is None:
+        # Legacy timestamp-addressed path. This remains as a compatibility fallback
+        # for callers that do not have a canonical logical frame identity.
+        metadata = decoder.metadata
+        average_fps = metadata.average_fps
+        requested_indices = [round(ts * average_fps) for ts in timestamps]
+    else:
+        if len(frame_indices) != len(timestamps):
+            raise ValueError("frame_indices and timestamps must have the same length")
+        if any(isinstance(index, bool) or not isinstance(index, int) or index < 0 for index in frame_indices):
+            raise ValueError("frame_indices must contain non-negative integers")
+        requested_indices = frame_indices
+
+    # get_frames_at returns exactly one frame per requested index, in order, so
+    # frame i already corresponds to timestamps[i]. Timestamp is validated below
+    # as synchronization evidence rather than reused as frame identity.
+    frames_batch = decoder.get_frames_at(indices=requested_indices)
     closest_frames = frames_batch.data
 
     # float64: hour-scale timestamps quantize past tolerance_s in float32.
@@ -472,6 +495,7 @@ def decode_video_frames_torchcodec(
             f"\nqueried timestamps: {query_ts}"
             f"\nloaded timestamps: {loaded_ts}"
             f"\nvideo: {video_path}"
+            f"\nframe_indices: {requested_indices}"
         )
 
     return normalize_rgb_frames(closest_frames, return_uint8)

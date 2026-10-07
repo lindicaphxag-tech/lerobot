@@ -161,6 +161,7 @@ class DatasetReader(BaseDatasetReader):
         self._column_views: dict[str, datasets.Dataset] = {}
         self._column_views_source: datasets.Dataset | None = None
         self._column_views_transform: Callable | None = None
+        self._video_file_frame_offsets: dict[tuple[int, str], int] | None = None
 
         # Setup delta_indices (doesn't depend on hf_dataset)
         self.delta_indices = None
@@ -426,7 +427,59 @@ class DatasetReader(BaseDatasetReader):
             for rel in rel_per_item
         ]
 
-    def _query_videos(self, query_timestamps: dict[str, list[float]], ep_idx: int) -> dict[str, torch.Tensor]:
+    def _build_video_file_frame_offsets(self) -> dict[tuple[int, str], int]:
+        """Derive file-local logical frame offsets from existing v3 metadata.
+
+        Episodes already provide their logical length and the physical
+        (chunk_index, file_index) storing each camera stream. Summing earlier
+        episode lengths for the same physical file recovers a canonical frame
+        offset without adding a new persisted schema field.
+        """
+        cursors: dict[tuple[str, int, int], int] = {}
+        offsets: dict[tuple[int, str], int] = {}
+        for episode_index in range(self._meta.total_episodes):
+            ep = self._meta.episodes[episode_index]
+            length = int(ep["length"])
+            for vid_key in self._meta.video_keys:
+                file_key = (
+                    vid_key,
+                    int(ep[f"videos/{vid_key}/chunk_index"]),
+                    int(ep[f"videos/{vid_key}/file_index"]),
+                )
+                offsets[(episode_index, vid_key)] = cursors.get(file_key, 0)
+                cursors[file_key] = offsets[(episode_index, vid_key)] + length
+        return offsets
+
+    def _get_query_video_frame_indices(
+        self,
+        *,
+        abs_idx: int,
+        ep_idx: int,
+        query_indices: dict[str, list[int]] | None,
+    ) -> dict[str, list[int]]:
+        """Map dataset-wide logical rows to physical-file logical frame indices."""
+        if self._video_file_frame_offsets is None:
+            self._video_file_frame_offsets = self._build_video_file_frame_offsets()
+
+        ep = self._meta.episodes[ep_idx]
+        ep_start = int(ep["dataset_from_index"])
+        result: dict[str, list[int]] = {}
+        for vid_key in self._meta.video_keys:
+            absolute = (
+                query_indices[vid_key]
+                if query_indices is not None and vid_key in query_indices
+                else [abs_idx]
+            )
+            file_start = self._video_file_frame_offsets[(ep_idx, vid_key)]
+            result[vid_key] = [file_start + int(index) - ep_start for index in absolute]
+        return result
+
+    def _query_videos(
+        self,
+        query_timestamps: dict[str, list[float]],
+        ep_idx: int,
+        query_frame_indices: dict[str, list[int]] | None = None,
+    ) -> dict[str, torch.Tensor]:
         """Note: When using data workers (e.g. DataLoader with num_workers>0), do not call this function
         in the main process (e.g. by using a second Dataloader with num_workers=0). It will result in a
         Segmentation Fault.
@@ -443,6 +496,7 @@ class DatasetReader(BaseDatasetReader):
                 self._video_backend,
                 return_uint8=self._return_uint8,
                 is_depth=vid_key in self._meta.depth_keys,
+                frame_indices=(None if query_frame_indices is None else query_frame_indices[vid_key]),
             )
             if vid_key in self._meta.depth_keys:
                 frames = dequantize_depth_frames(
@@ -520,8 +574,22 @@ class DatasetReader(BaseDatasetReader):
         if len(self._meta.video_keys) > 0:
             current_ts = [float(items[i]["timestamp"]) for i in range(n)]
             query_timestamps = self._get_query_timestamps(current_ts, query_indices_per_item)
-            for item, query_ts, ep_idx in zip(items, query_timestamps, ep_idxs, strict=True):
-                item.update(self._query_videos(query_ts, ep_idx))
+            query_frame_indices = [
+                self._get_query_video_frame_indices(
+                    abs_idx=abs_idxs[i],
+                    ep_idx=ep_idxs[i],
+                    query_indices=query_indices_per_item[i],
+                )
+                for i in range(n)
+            ]
+            for item, query_ts, frame_idx, ep_idx in zip(
+                items,
+                query_timestamps,
+                query_frame_indices,
+                ep_idxs,
+                strict=True,
+            ):
+                item.update(self._query_videos(query_ts, ep_idx, frame_idx))
 
         for item in items:
             apply_rgb_transforms(item, self._image_transforms, self._meta.camera_keys, self._meta.depth_keys)
