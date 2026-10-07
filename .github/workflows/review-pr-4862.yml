@@ -1,0 +1,67 @@
+name: Review LeRobot PR 4862
+
+on:
+  push:
+    branches:
+      - "validation/review-4862"
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install LeRobot test environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: Run PR hook tests
+        run: python -m pytest -q tests/policies/test_diffusion_hooks.py
+      - name: Probe mismatched hook-width diagnostics
+        run: |
+          python - <<'PY'
+          import torch
+          from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
+          from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+          from lerobot.policies.diffusion.modeling_diffusion import DiffusionModel
+          from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_STATE
+
+          OBS_EXTRA = "observation.extra"
+
+          class BadWidthModel(DiffusionModel):
+              def _extra_global_cond_dim(self, config):
+                  return 5
+              def _extra_global_cond_feats(self, batch):
+                  return batch[OBS_EXTRA]
+
+          cfg = DiffusionConfig(horizon=8, n_action_steps=4, n_obs_steps=2, down_dims=(64, 128))
+          cfg.input_features = {
+              OBS_STATE: PolicyFeature(FeatureType.STATE, (6,)),
+              OBS_ENV_STATE: PolicyFeature(FeatureType.ENV, (4,)),
+          }
+          cfg.output_features = {ACTION: PolicyFeature(FeatureType.ACTION, (6,))}
+          cfg.normalization_mapping = dict.fromkeys(
+              ("STATE", "ACTION", "VISUAL", "ENV"), NormalizationMode.MEAN_STD
+          )
+          model = BadWidthModel(cfg)
+          batch = {
+              OBS_STATE: torch.randn(2, 2, 6),
+              OBS_ENV_STATE: torch.randn(2, 2, 4),
+              OBS_EXTRA: torch.randn(2, 2, 4),  # promised 5, returned 4
+              ACTION: torch.randn(2, 8, 6),
+              "action_is_pad": torch.zeros(2, 8, dtype=torch.bool),
+          }
+          try:
+              model.compute_loss(batch)
+          except Exception as exc:
+              print("diagnostic_exception_type=", type(exc).__name__)
+              print("diagnostic_message=", str(exc)[:500])
+              if isinstance(exc, ValueError):
+                  raise AssertionError("mismatch already has an early ValueError; review suggestion is obsolete")
+          else:
+              raise AssertionError("mismatched hook width unexpectedly succeeded")
+          PY
