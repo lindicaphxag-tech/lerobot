@@ -438,9 +438,7 @@ def test_act_processor_relative_actions_pipeline_and_roundtrip():
     assert isinstance(postprocessor.steps[0], UnnormalizerProcessorStep)
     assert isinstance(postprocessor.steps[1], AbsoluteActionsProcessorStep)
 
-    observation = {
-        OBS_STATE: torch.tensor([10.0, 20.0, 30.0, 40.0, 0.0, 0.0, 0.0])
-    }
+    observation = {OBS_STATE: torch.tensor([10.0, 20.0, 30.0, 40.0, 0.0, 0.0, 0.0])}
     action = torch.tensor([11.0, 22.0, 33.0, 0.4])
     transition = create_transition(observation, action)
     processed = preprocessor(transition_to_batch(transition))
