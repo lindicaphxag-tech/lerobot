@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+pytest.importorskip("datasets")
+
 from lerobot.datasets.dataset_reader import DatasetReader
 from lerobot.datasets.video_utils import (
     FrameTimestampError,
