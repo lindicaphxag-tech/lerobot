@@ -146,6 +146,42 @@ def test_act_processor_relative_actions_round_trip():
     torch.testing.assert_close(restored, action.unsqueeze(0))
 
 
+def test_act_relative_actions_keep_chunk_anchor_until_queue_drains():
+    """Later observations must not re-anchor a previously generated ACT chunk."""
+    config = create_default_config()
+    config.use_relative_actions = True
+    config.action_feature_names = ["joint_0", "joint_1", "joint_2", "gripper"]
+    stats = create_default_stats()
+    preprocessor, postprocessor = make_act_pre_post_processors(config, stats)
+
+    relative_step = preprocessor.steps[3]
+    assert isinstance(relative_step, RelativeActionsProcessorStep)
+    queued_actions = [0]
+    relative_step.bind_action_queue(lambda: queued_actions[0])
+
+    initial_state = torch.tensor([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0])
+    moved_state = torch.tensor([10.0, 20.0, 30.0, 0.0, 0.0, 0.0, 0.0])
+    sample_action = torch.tensor([1.0, 2.0, 3.0, 0.5])
+    preprocessor(transition_to_batch(create_transition({OBS_STATE: initial_state}, sample_action)))
+
+    queued_actions[0] = 2
+    preprocessor(transition_to_batch(create_transition({OBS_STATE: moved_state}, sample_action)))
+    relative_chunk = torch.tensor([[[0.5, -0.5, 1.0, 0.7], [1.0, 0.5, -1.0, 0.8]]])
+    restored = postprocessor(relative_chunk)
+    torch.testing.assert_close(
+        restored,
+        torch.tensor([[[1.5, 1.5, 4.0, 0.7], [2.0, 2.5, 2.0, 0.8]]]),
+    )
+
+    queued_actions[0] = 0
+    preprocessor(transition_to_batch(create_transition({OBS_STATE: moved_state}, sample_action)))
+    reanchored = postprocessor(relative_chunk)
+    torch.testing.assert_close(
+        reanchored,
+        torch.tensor([[[10.5, 19.5, 31.0, 0.7], [11.0, 20.5, 29.0, 0.8]]]),
+    )
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_act_processor_cuda():
     """Test ACT processor with CUDA device."""
