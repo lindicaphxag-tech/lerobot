@@ -467,10 +467,7 @@ def decode_video_frames_torchcodec(
     else:
         if len(frame_indices) != len(timestamps):
             raise ValueError("frame_indices and timestamps must have the same length")
-        if any(
-            isinstance(index, bool) or not isinstance(index, int) or index < 0
-            for index in frame_indices
-        ):
+        if any(isinstance(index, bool) or not isinstance(index, int) or index < 0 for index in frame_indices):
             raise ValueError("frame_indices must contain non-negative integers")
         requested_indices = frame_indices
 
