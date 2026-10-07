@@ -24,10 +24,12 @@ from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
 from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.act.processor_act import make_act_pre_post_processors
 from lerobot.processor import (
+    AbsoluteActionsProcessorStep,
     AddBatchDimensionProcessorStep,
     DataProcessorPipeline,
     DeviceProcessorStep,
     NormalizerProcessorStep,
+    RelativeActionsProcessorStep,
     RenameObservationsProcessorStep,
     TransitionKey,
     UnnormalizerProcessorStep,
@@ -113,6 +115,35 @@ def test_act_processor_normalization():
 
     # Check that action is unnormalized
     assert postprocessed.shape == (1, 4)
+
+
+def test_act_processor_relative_actions_round_trip():
+    """ACT relative actions use the shared state-relative processor contract."""
+    config = create_default_config()
+    config.use_relative_actions = True
+    config.relative_exclude_joints = ["gripper"]
+    config.action_feature_names = ["joint_0", "joint_1", "joint_2", "gripper"]
+    stats = create_default_stats()
+
+    preprocessor, postprocessor = make_act_pre_post_processors(config, stats)
+
+    assert len(preprocessor.steps) == 5
+    assert isinstance(preprocessor.steps[3], RelativeActionsProcessorStep)
+    assert len(postprocessor.steps) == 3
+    assert isinstance(postprocessor.steps[1], AbsoluteActionsProcessorStep)
+
+    state = torch.tensor([1.0, 2.0, 3.0, 0.25, 0.0, 0.0, 0.0])
+    action = torch.tensor([1.5, 1.0, 4.0, 0.8])
+    batch = transition_to_batch(create_transition({OBS_STATE: state}, action))
+
+    processed = preprocessor(batch)
+    torch.testing.assert_close(
+        processed[TransitionKey.ACTION],
+        torch.tensor([[0.5, -1.0, 1.0, 0.8]]),
+    )
+
+    restored = postprocessor(processed[TransitionKey.ACTION])
+    torch.testing.assert_close(restored, action.unsqueeze(0))
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
