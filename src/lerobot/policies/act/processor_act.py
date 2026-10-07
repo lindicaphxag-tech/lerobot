@@ -59,9 +59,7 @@ def make_act_pre_post_processors(
         exclude_joints=config.relative_exclude_joints,
         action_names=config.action_feature_names,
     )
-    steps = make_default_policy_processor_steps(
-        config, dataset_stats, normalizer_device=config.device
-    )
+    steps = make_default_policy_processor_steps(config, dataset_stats, normalizer_device=config.device)
 
     return make_policy_processor_pipelines(
         input_steps=[
