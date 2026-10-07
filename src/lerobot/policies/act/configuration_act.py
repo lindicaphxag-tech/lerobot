@@ -93,6 +93,13 @@ class ACTConfig(PreTrainedConfig):
         }
     )
 
+    # Relative actions: converts absolute actions to state-relative actions.
+    use_relative_actions: bool = False
+    # Joint names to keep absolute. Empty list = all action dims relative.
+    relative_exclude_joints: list[str] = field(default_factory=lambda: ["gripper"])
+    # Populated from dataset action-feature metadata by make_policy when available.
+    action_feature_names: list[str] | None = None
+
     # Architecture.
     # Vision backbone.
     vision_backbone: str = "resnet18"
