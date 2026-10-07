@@ -16,6 +16,7 @@
 """Tests for ACT policy processor."""
 
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -24,13 +25,16 @@ from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
 from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.act.processor_act import make_act_pre_post_processors
 from lerobot.processor import (
+    AbsoluteActionsProcessorStep,
     AddBatchDimensionProcessorStep,
     DataProcessorPipeline,
     DeviceProcessorStep,
     NormalizerProcessorStep,
+    RelativeActionsProcessorStep,
     RenameObservationsProcessorStep,
     TransitionKey,
     UnnormalizerProcessorStep,
+    bind_relative_anchor,
 )
 from lerobot.processor.converters import create_transition, transition_to_batch
 from lerobot.utils.constants import ACTION, OBS_STATE
@@ -410,3 +414,68 @@ def test_act_processor_bfloat16_device_float32_normalizer():
     assert normalizer_step.dtype == torch.bfloat16
     for stat_tensor in normalizer_step._tensor_stats[OBS_STATE].values():
         assert stat_tensor.dtype == torch.bfloat16
+
+
+def test_act_processor_relative_actions_pipeline_and_roundtrip():
+    """ACT should mirror pi0/pi05 ordering when relative actions are enabled."""
+    config = create_default_config()
+    config.use_relative_actions = True
+    config.relative_exclude_joints = ["gripper"]
+    config.action_feature_names = [
+        "joint_0.pos",
+        "joint_1.pos",
+        "joint_2.pos",
+        "gripper.pos",
+    ]
+    stats = create_default_stats()
+
+    preprocessor, postprocessor = make_act_pre_post_processors(config, stats)
+
+    assert len(preprocessor.steps) == 5
+    assert isinstance(preprocessor.steps[3], RelativeActionsProcessorStep)
+    assert isinstance(preprocessor.steps[4], NormalizerProcessorStep)
+    assert len(postprocessor.steps) == 3
+    assert isinstance(postprocessor.steps[0], UnnormalizerProcessorStep)
+    assert isinstance(postprocessor.steps[1], AbsoluteActionsProcessorStep)
+
+    observation = {OBS_STATE: torch.tensor([10.0, 20.0, 30.0, 40.0, 0.0, 0.0, 0.0])}
+    action = torch.tensor([11.0, 22.0, 33.0, 0.4])
+    transition = create_transition(observation, action)
+    processed = preprocessor(transition_to_batch(transition))
+
+    # Stats are identity in this fixture. The first three dimensions become
+    # offsets from state, while the excluded gripper remains absolute.
+    torch.testing.assert_close(
+        processed[TransitionKey.ACTION],
+        torch.tensor([[1.0, 2.0, 3.0, 0.4]]),
+    )
+
+    recovered = postprocessor(processed[TransitionKey.ACTION])
+    torch.testing.assert_close(recovered, action.unsqueeze(0))
+
+
+def test_act_relative_anchor_is_held_while_action_queue_drains():
+    """ACT's preprocessor should participate in the shared chunk-anchor contract."""
+    config = create_default_config()
+    config.use_relative_actions = True
+    config.relative_exclude_joints = []
+    stats = create_default_stats()
+    preprocessor, _ = make_act_pre_post_processors(config, stats)
+
+    depth = {"n": 0}
+    policy = SimpleNamespace(count_queued_actions=lambda: depth["n"])
+    step = bind_relative_anchor(policy, preprocessor)
+    assert isinstance(step, RelativeActionsProcessorStep)
+
+    first = torch.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]])
+    step(create_transition(observation={OBS_STATE: first}))
+    torch.testing.assert_close(step.get_cached_state(), first)
+
+    depth["n"] = 2
+    moved = first + 10
+    step(create_transition(observation={OBS_STATE: moved}))
+    torch.testing.assert_close(step.get_cached_state(), first)
+
+    depth["n"] = 0
+    step(create_transition(observation={OBS_STATE: moved}))
+    torch.testing.assert_close(step.get_cached_state(), moved)

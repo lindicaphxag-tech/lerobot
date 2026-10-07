@@ -74,6 +74,43 @@ lerobot-train \
 
 If your local computer doesn't have a powerful GPU, you can utilize Google Colab to train your model by following the [ACT training notebook](./notebooks#training-act).
 
+### Relative Actions
+
+ACT can train and run with state-relative action chunks. Relative conversion is
+applied before action normalization, so the dataset must contain **relative
+action statistics** before training.
+
+First recompute action statistics using the same chunk size and excluded joints
+that will be used by the policy:
+
+```bash
+lerobot-edit-dataset \
+  --repo_id your_dataset \
+  --operation.type recompute_stats \
+  --operation.relative_action true \
+  --operation.chunk_size 100 \
+  --operation.relative_exclude_joints "['gripper']"
+```
+
+Then enable relative actions for ACT:
+
+```bash
+lerobot-train \
+  --dataset.repo_id=your_dataset \
+  --policy.type=act \
+  --policy.use_relative_actions=true \
+  --policy.relative_exclude_joints='["gripper"]'
+```
+
+All actions in a predicted chunk use the state from the chunk's inference
+boundary as their shared reference. The action-queue binding keeps that anchor
+fixed while queued ACT actions are being executed. Dataset action feature names
+are populated automatically by `make_policy`, so excluded joints such as the
+gripper can remain in absolute space.
+
+See [Action Representations](./action_representations) for the distinction
+between absolute, relative, and sequential-delta actions.
+
 ## Evaluating ACT
 
 Once training is complete, you can evaluate your ACT policy using the `lerobot-record` command with your trained policy. This will run inference and record evaluation episodes:
