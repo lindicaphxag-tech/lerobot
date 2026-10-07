@@ -471,9 +471,7 @@ class DatasetReader(BaseDatasetReader):
                 else [abs_idx]
             )
             file_start = self._video_file_frame_offsets[(ep_idx, vid_key)]
-            result[vid_key] = [
-                file_start + int(index) - ep_start for index in absolute
-            ]
+            result[vid_key] = [file_start + int(index) - ep_start for index in absolute]
         return result
 
     def _query_videos(
@@ -498,11 +496,7 @@ class DatasetReader(BaseDatasetReader):
                 self._video_backend,
                 return_uint8=self._return_uint8,
                 is_depth=vid_key in self._meta.depth_keys,
-                frame_indices=(
-                    None
-                    if query_frame_indices is None
-                    else query_frame_indices[vid_key]
-                ),
+                frame_indices=(None if query_frame_indices is None else query_frame_indices[vid_key]),
             )
             if vid_key in self._meta.depth_keys:
                 frames = dequantize_depth_frames(
