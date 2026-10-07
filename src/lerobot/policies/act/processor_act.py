@@ -54,6 +54,12 @@ def make_act_pre_post_processors(
     if not config.use_relative_actions:
         return make_default_pre_post_processors(config, dataset_stats, normalizer_device=config.device)
 
+    if config.relative_exclude_joints and not config.action_feature_names:
+        raise ValueError(
+            "ACT relative actions with excluded joints require action_feature_names "
+            "from dataset metadata; otherwise excluded dimensions would be converted."
+        )
+
     relative_step = RelativeActionsProcessorStep(
         enabled=True,
         exclude_joints=config.relative_exclude_joints,
