@@ -93,6 +93,17 @@ class DiffusionPolicy(PreTrainedPolicy):
     def get_optim_params(self) -> dict:
         return self.diffusion.parameters()
 
+    def _extra_observation_queue_keys(self) -> tuple[str, ...]:
+        """Explicit extra online observation keys a subclass must cache.
+
+        Implemented by subclasses whose _extra_global_cond_feats uses
+        additional time-indexed inputs. The base policy adds no queues.
+        This is required because populate_queues intentionally ignores
+        unknown observation keys; otherwise extra training inputs vanish
+        on the first online select_action call.
+        """
+        return ()
+
     def reset(self):
         """Clear observation and action queues. Should be called on `env.reset()`"""
         self._queues = {
@@ -103,6 +114,11 @@ class DiffusionPolicy(PreTrainedPolicy):
             self._queues[OBS_IMAGES] = deque(maxlen=self.config.n_obs_steps)
         if self.config.env_state_feature:
             self._queues[OBS_ENV_STATE] = deque(maxlen=self.config.n_obs_steps)
+        for key in self._extra_observation_queue_keys():
+            if (not key.startswith("observation.") or
+                    key in self._queues or key == ACTION):
+                raise ValueError(f"Invalid/duplicate extra observation queue: {key}")
+            self._queues[key] = deque(maxlen=self.config.n_obs_steps)
 
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
