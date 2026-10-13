@@ -88,3 +88,50 @@ def test_parent_queue_contract_exposes_missing_subclass_input():
         "Online queued inference MUST retain the subclass's extra "
         "conditioning feature; PR #4862 reset() only creates built-in keys."
     )
+
+
+def test_extra_observation_history_maintains_tick_order_in_online_action_queue():
+    """Online feature provenance must distinguish previous/current observation."""
+    torch.manual_seed(944)
+    policy=ExtraObsPolicy(_config())
+    def obs(value):
+        return {
+            OBS_STATE:torch.zeros(1,6),
+            OBS_ENV_STATE:torch.zeros(1,4),
+            EXTRA:torch.full((1,E),float(value)),
+        }
+    # First observation is repeated until the n_obs_steps buffer is full.
+    first=policy.select_action(obs(1),noise=torch.zeros(1,8,6))
+    assert first.shape==(1,6)
+    assert len(policy._queues[EXTRA])==2
+    assert all(torch.equal(x,torch.ones(1,E)) for x in policy._queues[EXTRA])
+
+    # Even with remaining actions in its action queue, a new actual
+    # observation must advance the extra feature history.
+    second=policy.select_action(obs(2))
+    assert second.shape==(1,6)
+    assert torch.equal(policy._queues[EXTRA][0],torch.ones(1,E))
+    assert torch.equal(policy._queues[EXTRA][1],torch.full((1,E),2.))
+
+
+def test_conflicting_or_non_observation_queue_declared_names_are_refused():
+    class DuplicateQueuePolicy(ExtraObsPolicy):
+        def _extra_observation_queue_keys(self):
+            return (OBS_STATE,)
+    class InvalidQueuePolicy(ExtraObsPolicy):
+        def _extra_observation_queue_keys(self):
+            return ("control.hidden_state",)
+
+    import pytest
+    with pytest.raises(ValueError,match="Invalid/duplicate"):
+        DuplicateQueuePolicy(_config())
+    with pytest.raises(ValueError,match="Invalid/duplicate"):
+        InvalidQueuePolicy(_config())
+
+
+def test_missing_new_observation_refuses_online_inference_not_silent_reuse():
+    import pytest
+    policy=ExtraObsPolicy(_config())
+    obs={OBS_STATE:torch.zeros(1,6),OBS_ENV_STATE:torch.zeros(1,4)}
+    with pytest.raises(KeyError,match="observation.extra"):
+        policy.select_action(obs,noise=torch.zeros(1,8,6))
