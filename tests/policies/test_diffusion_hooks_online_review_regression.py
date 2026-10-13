@@ -30,6 +30,11 @@ class ExtraObsPolicy(DiffusionPolicy):
     def _make_diffusion_model(self, config: DiffusionConfig):
         return ExtraObsDiffusion(config)
 
+    def _extra_observation_queue_keys(self) -> tuple[str, ...]:
+        # Explicit sensor history contract; only keys used by the new
+        # diffusion conditioning branch are added, not arbitrary metadata.
+        return (EXTRA,)
+
 
 def _config():
     cfg=DiffusionConfig(
