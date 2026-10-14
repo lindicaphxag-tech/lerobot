@@ -62,7 +62,7 @@ def get_hf_features_from_features(features: dict) -> datasets.Features:
             continue
         elif ft["dtype"] == "image":
             hf_features[key] = datasets.Image()
-        elif ft["shape"] == (1,):
+        elif tuple(ft["shape"]) == (1,):
             hf_features[key] = datasets.Value(dtype=ft["dtype"])
         elif len(ft["shape"]) == 1:
             hf_features[key] = datasets.Sequence(
@@ -312,7 +312,7 @@ def validate_feature_dtype_and_shape(
 
 
 def validate_feature_numpy_array(
-    name: str, expected_dtype: str, expected_shape: list[int], value: np.ndarray
+    name: str, expected_dtype: str, expected_shape: list[int] | tuple[int, ...], value: np.ndarray
 ) -> str:
     """Validate a feature that is expected to be a numpy array.
 
@@ -333,7 +333,9 @@ def validate_feature_numpy_array(
         if actual_dtype != np.dtype(expected_dtype):
             error_message += f"The feature '{name}' of dtype '{actual_dtype}' is not of the expected dtype '{expected_dtype}'.\n"
 
-        if actual_shape != expected_shape:
+        # JSON array shapes become lists, while ndarray.shape is a tuple. Compare
+        # dimension values rather than Python sequence representation.
+        if actual_shape != tuple(expected_shape):
             error_message += f"The feature '{name}' of shape '{actual_shape}' does not have the expected shape '{expected_shape}'.\n"
     else:
         error_message += f"The feature '{name}' is not a 'np.ndarray'. Expected type is '{expected_dtype}', but type '{type(value)}' provided instead.\n"
