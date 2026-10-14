@@ -349,6 +349,16 @@ class _NormalizationMixin:
 
         stats = self._tensor_stats[key]
 
+        # Small configured eps values may underflow when statistics are cast to
+        # the input dtype (1e-8 becomes zero in fp16). Use the smallest
+        # positive *normal* number to keep constant-coordinate denominators
+        # representable and avoid unstable subnormal scaling in mixed precision.
+        effective_eps = (
+            max(self.eps, torch.finfo(tensor.dtype).tiny)
+            if tensor.is_floating_point()
+            else self.eps
+        )
+
         if norm_mode == NormalizationMode.MEAN_STD:
             mean = stats.get("mean", None)
             std = stats.get("std", None)
@@ -359,7 +369,7 @@ class _NormalizationMixin:
 
             mean, std = stats["mean"], stats["std"]
             # Avoid division by zero by adding a small epsilon.
-            denom = std + self.eps
+            denom = std + effective_eps
             if inverse:
                 return tensor * std + mean
             return (tensor - mean) / denom
@@ -378,7 +388,7 @@ class _NormalizationMixin:
             # to prevent division by zero. This consistently maps an input equal to
             # min_val to -1, ensuring a stable transformation.
             denom = torch.where(
-                denom == 0, torch.tensor(self.eps, device=tensor.device, dtype=tensor.dtype), denom
+                denom == 0, torch.tensor(effective_eps, device=tensor.device, dtype=tensor.dtype), denom
             )
             if inverse:
                 # Map from [-1, 1] back to [min, max]
@@ -397,7 +407,7 @@ class _NormalizationMixin:
             denom = q99 - q01
             # Avoid division by zero by adding epsilon when quantiles are identical
             denom = torch.where(
-                denom == 0, torch.tensor(self.eps, device=tensor.device, dtype=tensor.dtype), denom
+                denom == 0, torch.tensor(effective_eps, device=tensor.device, dtype=tensor.dtype), denom
             )
             if inverse:
                 return (tensor + 1.0) * denom / 2.0 + q01
@@ -414,7 +424,7 @@ class _NormalizationMixin:
             denom = q90 - q10
             # Avoid division by zero by adding epsilon when quantiles are identical
             denom = torch.where(
-                denom == 0, torch.tensor(self.eps, device=tensor.device, dtype=tensor.dtype), denom
+                denom == 0, torch.tensor(effective_eps, device=tensor.device, dtype=tensor.dtype), denom
             )
             if inverse:
                 return (tensor + 1.0) * denom / 2.0 + q10
