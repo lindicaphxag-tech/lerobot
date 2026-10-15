@@ -62,20 +62,22 @@ def get_hf_features_from_features(features: dict) -> datasets.Features:
             continue
         elif ft["dtype"] == "image":
             hf_features[key] = datasets.Image()
-        elif ft["shape"] == (1,):
+        elif tuple(ft["shape"]) == (1,):
+            # JSON round-trips serialize shape tuples as lists. The Arrow
+            # schema must not change when the same feature is reloaded.
             hf_features[key] = datasets.Value(dtype=ft["dtype"])
         elif len(ft["shape"]) == 1:
             hf_features[key] = datasets.Sequence(
                 length=ft["shape"][0], feature=datasets.Value(dtype=ft["dtype"])
             )
         elif len(ft["shape"]) == 2:
-            hf_features[key] = datasets.Array2D(shape=ft["shape"], dtype=ft["dtype"])
+            hf_features[key] = datasets.Array2D(shape=tuple(ft["shape"]), dtype=ft["dtype"])
         elif len(ft["shape"]) == 3:
-            hf_features[key] = datasets.Array3D(shape=ft["shape"], dtype=ft["dtype"])
+            hf_features[key] = datasets.Array3D(shape=tuple(ft["shape"]), dtype=ft["dtype"])
         elif len(ft["shape"]) == 4:
-            hf_features[key] = datasets.Array4D(shape=ft["shape"], dtype=ft["dtype"])
+            hf_features[key] = datasets.Array4D(shape=tuple(ft["shape"]), dtype=ft["dtype"])
         elif len(ft["shape"]) == 5:
-            hf_features[key] = datasets.Array5D(shape=ft["shape"], dtype=ft["dtype"])
+            hf_features[key] = datasets.Array5D(shape=tuple(ft["shape"]), dtype=ft["dtype"])
         else:
             raise ValueError(f"Corresponding feature is not valid: {ft}")
 
@@ -333,7 +335,10 @@ def validate_feature_numpy_array(
         if actual_dtype != np.dtype(expected_dtype):
             error_message += f"The feature '{name}' of dtype '{actual_dtype}' is not of the expected dtype '{expected_dtype}'.\n"
 
-        if actual_shape != expected_shape:
+        # Shapes loaded from info.json are lists; NumPy always reports
+        # tuples. The same schema must validate identically before/after
+        # serialization without weakening actual dimension checks.
+        if actual_shape != tuple(expected_shape):
             error_message += f"The feature '{name}' of shape '{actual_shape}' does not have the expected shape '{expected_shape}'.\n"
     else:
         error_message += f"The feature '{name}' is not a 'np.ndarray'. Expected type is '{expected_dtype}', but type '{type(value)}' provided instead.\n"
