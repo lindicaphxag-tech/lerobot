@@ -1,0 +1,27 @@
+name: Rank-aware action transport research verification
+
+on:
+  push:
+    branches: [research/rank-aware-action-statistics-20261015]
+  pull_request:
+    paths:
+      - "research/rank_aware_action_transport.py"
+      - "research/tests/test_rank_aware_action_transport.py"
+
+jobs:
+  cpu-properties:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install numerical dependency
+        run: python -m pip install "numpy>=1.26,<3"
+      - name: Run source-level property and refusal tests
+        run: python -m unittest -v research.tests.test_rank_aware_action_transport
