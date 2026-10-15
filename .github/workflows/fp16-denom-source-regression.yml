@@ -1,0 +1,62 @@
+name: Scoped LeRobot FP16 normalization production-source regression
+on:
+  push:
+    branches: [ci/fp16-norm-source-validation-20261015]
+permissions: {contents: read}
+jobs:
+  numerical-kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 3}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install CPU tensor runtime
+        run: python -m pip install --disable-pip-version-check torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Validate exact committed production function and pre-fix control
+        run: |
+          python - <<'PY'
+          import ast, subprocess, types
+          from pathlib import Path
+          import torch
+          source_path="src/lerobot/processor/normalize_processor.py"
+          now=Path(source_path).read_text()
+          old=subprocess.check_output(["git","show","HEAD~2:"+source_path],text=True)
+          modes=types.SimpleNamespace(IDENTITY="identity",MEAN_STD="mean_std",MIN_MAX="min_max",QUANTILES="quantiles",QUANTILE10="quantile10")
+          def method(source):
+              tree=ast.parse(source)
+              fn=next(fn for cls in tree.body if isinstance(cls,ast.ClassDef) for fn in cls.body
+                      if isinstance(fn,ast.FunctionDef) and fn.name=="_apply_transform")
+              m=ast.Module(body=[ast.ImportFrom(module="__future__",names=[ast.alias(name="annotations")],level=0),fn],type_ignores=[])
+              ast.fix_missing_locations(m)
+              scope={"torch":torch,"NormalizationMode":modes}
+              exec(compile(m,"source-normalizer", "exec"),scope)
+              return scope["_apply_transform"]
+          before=method(old);after=method(now)
+          class Object:
+              eps=1e-8
+              def to(self,device,dtype):return self
+          results={}
+          for dtype in (torch.float16,torch.bfloat16,torch.float32):
+              for mode in ("MEAN_STD","MIN_MAX","QUANTILES","QUANTILE10"):
+                  for inverse in (False,True):
+                      obj=Object();obj.norm_map={"state":getattr(modes,mode)}
+                      constants={n:torch.tensor([1.0],dtype=dtype) for n in ("mean","min","max","q01","q99","q10","q90")}
+                      constants["std"]=torch.tensor([0.0],dtype=dtype)
+                      obj._tensor_stats={"observation.state":constants}
+                      inp=torch.tensor([1.0 if not inverse else 0.],dtype=dtype,requires_grad=True)
+                      out=after(obj,inp,"observation.state","state",inverse=inverse)
+                      assert torch.isfinite(out).all(),(dtype,mode,inverse,out)
+                      out.sum().backward()
+                      assert torch.isfinite(inp.grad).all(),(dtype,mode,inverse,inp.grad)
+                      results[str((dtype,mode,inverse))]=float(out.item())
+          for mode in ("MEAN_STD","MIN_MAX","QUANTILES","QUANTILE10"):
+              obj=Object();obj.norm_map={"state":getattr(modes,mode)}
+              p={n:torch.tensor([1.0],dtype=torch.float16) for n in ("mean","min","max","q01","q99","q10","q90")}
+              p["std"]=torch.tensor([0.0],dtype=torch.float16)
+              obj._tensor_stats={"observation.state":p}
+              with torch.no_grad():previous=before(obj,torch.tensor([1.0],dtype=torch.float16),"observation.state","state")
+              assert not torch.isfinite(previous).all(),(mode,previous)
+          print("PASS real source regression 24 forward and 24 backward finite cases, 4 pre-fix nonfinite controls")
+          PY
