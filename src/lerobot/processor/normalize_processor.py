@@ -302,6 +302,12 @@ class _NormalizationMixin:
         processed_action = self._apply_transform(action, ACTION, FeatureType.ACTION, inverse=inverse)
         return processed_action
 
+    def _effective_eps(self, dtype: torch.dtype) -> float:
+        """Return an epsilon representable by ``dtype`` without underflowing to zero."""
+        if dtype.is_floating_point:
+            return max(self.eps, torch.finfo(dtype).tiny)
+        return self.eps
+
     def _apply_transform(
         self, tensor: Tensor, key: str, feature_type: FeatureType, *, inverse: bool = False
     ) -> Tensor:
@@ -358,8 +364,10 @@ class _NormalizationMixin:
                 )
 
             mean, std = stats["mean"], stats["std"]
-            # Avoid division by zero by adding a small epsilon.
-            denom = std + self.eps
+            # ``1e-8`` rounds to zero in float16, so adding it directly to a
+            # float16 std does not prevent division by zero. Use the smallest
+            # representable positive value when the configured epsilon is smaller.
+            denom = std + self._effective_eps(std.dtype)
             if inverse:
                 return tensor * std + mean
             return (tensor - mean) / denom
@@ -378,7 +386,9 @@ class _NormalizationMixin:
             # to prevent division by zero. This consistently maps an input equal to
             # min_val to -1, ensuring a stable transformation.
             denom = torch.where(
-                denom == 0, torch.tensor(self.eps, device=tensor.device, dtype=tensor.dtype), denom
+                denom == 0,
+                torch.tensor(self._effective_eps(tensor.dtype), device=tensor.device, dtype=tensor.dtype),
+                denom,
             )
             if inverse:
                 # Map from [-1, 1] back to [min, max]
