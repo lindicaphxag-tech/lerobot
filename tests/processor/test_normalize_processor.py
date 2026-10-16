@@ -2135,3 +2135,27 @@ def test_stats_reconstruction_after_load_state_dict():
         new_result[TransitionKey.OBSERVATION][OBS_STATE],
     )
     torch.testing.assert_close(original_result[TransitionKey.ACTION], new_result[TransitionKey.ACTION])
+
+
+@pytest.mark.parametrize("norm_mode", [NormalizationMode.MEAN_STD, NormalizationMode.MIN_MAX])
+def test_fp16_constant_feature_normalization_is_finite(norm_mode):
+    features = {OBS_STATE: PolicyFeature(FeatureType.STATE, (1,))}
+    stats = {
+        OBS_STATE: (
+            {"mean": np.array([1.0]), "std": np.array([0.0])}
+            if norm_mode == NormalizationMode.MEAN_STD
+            else {"min": np.array([1.0]), "max": np.array([1.0])}
+        )
+    }
+    normalizer = NormalizerProcessorStep(
+        features=features,
+        norm_map={FeatureType.STATE: norm_mode},
+        stats=stats,
+        dtype=torch.float16,
+    )
+
+    transition = create_transition(observation={OBS_STATE: torch.tensor([1.0], dtype=torch.float16)})
+    normalized = normalizer(transition)[TransitionKey.OBSERVATION][OBS_STATE]
+
+    assert normalized.dtype == torch.float16
+    assert torch.isfinite(normalized).all()
