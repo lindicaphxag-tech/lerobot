@@ -195,6 +195,22 @@ def test_split_by_episodes(sample_dataset, tmp_path):
     assert val_episodes == {0, 1}
 
 
+def test_split_rejects_duplicate_episode_indices_within_split(sample_dataset, tmp_path):
+    """Reject repeated source IDs before creating an inconsistent split on disk."""
+    output_dir = tmp_path / "duplicate_split"
+
+    with pytest.raises(
+        ValueError, match=r"Split 'train' contains duplicate episode indices: \[0\]"
+    ):
+        split_dataset(
+            sample_dataset,
+            splits={"train": [0, 0, 1]},
+            output_dir=output_dir,
+        )
+
+    assert not output_dir.exists()
+
+
 def test_split_by_fractions(sample_dataset, tmp_path):
     """Test splitting dataset by fractions."""
     splits = {
